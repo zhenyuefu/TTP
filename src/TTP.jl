@@ -319,19 +319,19 @@ function evaluate(instance::TTPInstance, solution::TTPSolution)
             cityIndexForItem = currentCityTEMP - 1
 
             # 对应 Java 中的 for (int itemNumber=0; itemNumber<itemsPerCity; itemNumber++)
-            for itemNumber in 0:(itemsPerCity-1)
+            for itemNumber = 1:itemsPerCity
                 # indexOfPackingPlan = (i-1)*itemsPerCity+itemNumber
-                indexOfPackingPlan = (i-2)*itemsPerCity + (itemNumber+1)
+                indexOfPackingPlan = (i-2)*itemsPerCity + itemNumber
                 # 注意 Julia 是 1-based，所以要注意加减
 
                 # itemIndex = cityIndexForItem + itemNumber*(instance.numberOfNodes-1)
-                itemIndex = cityIndexForItem + itemNumber*(instance.numberOfNodes-1)
+                itemIndex = cityIndexForItem + (itemNumber-1)*(instance.numberOfNodes-1)
 
                 # 如果 z[indexOfPackingPlan] == 1，说明要拿这个物品
                 # 注意 Julia 下标
                 if z[indexOfPackingPlan] == 1
-                    currentWC  = instance.items[itemIndex+1, 3]  # weight
-                    currentFP  = instance.items[itemIndex+1, 2]  # profit
+                    currentWC  = instance.items[itemIndex, 2]  # weight
+                    currentFP  = instance.items[itemIndex, 1]  # profit
                     wc        += currentWC
                     solution.fp += currentFP
                 end

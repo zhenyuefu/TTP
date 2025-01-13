@@ -4,7 +4,7 @@ import Plots
 import Random
 import Test
 
-function generate_distance_matrix(n; random_seed = 1)
+function generate_distance_matrix(n; random_seed=1)
     rng = Random.MersenneTwister(random_seed)
     X = 100 * rand(rng, n)
     Y = 100 * rand(rng, n)
@@ -47,6 +47,14 @@ function subtour(edges::Vector{Tuple{Int,Int}}, n)
     return shortest_subtour
 end
 
+subtour(x::Matrix{Float64}) = subtour(selected_edges(x, size(x, 1)), size(x, 1))
+subtour(x::AbstractMatrix{VariableRef}) = subtour(value.(x))
+
+function selected_edges(x::Matrix{Float64}, n)
+    return Tuple{Int,Int}[(i, j) for i in 1:n, j in 1:n if x[i, j] > 0.5]
+end
+
+
 lazy_model = build_tsp_model(d, n)
 function subtour_elimination_callback(cb_data)
     status = callback_node_status(cb_data, lazy_model)
@@ -71,22 +79,18 @@ set_attribute(
 )
 optimize!(lazy_model)
 
-function selected_edges(x::Matrix{Float64}, n)
-    return Tuple{Int,Int}[(i, j) for i in 1:n, j in 1:n if x[i, j] > 0.5]
-end
-
 
 function plot_tour(X, Y, x)
     plot = Plots.plot()
     for (i, j) in selected_edges(x, size(x, 1))
-        Plots.plot!([X[i], X[j]], [Y[i], Y[j]]; legend = false)
+        Plots.plot!([X[i], X[j]], [Y[i], Y[j]]; legend=false)
     end
     return plot
 end
 
 @assert is_solved_and_feasible(lazy_model)
-objective_value(lazy_model)
-
+obj = objective_value(lazy_model)
+println("Objective value: $obj")
 time_lazy = solve_time(lazy_model)
-
+println("Time to solve: $time_lazy")
 plot_tour(X, Y, value.(lazy_model[:x]))
