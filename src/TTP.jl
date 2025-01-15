@@ -7,7 +7,7 @@ mutable struct TTPSolution
     packingPlan::Vector{Int}
     fp::Float64
     ft::Float64
-    ftraw::Int
+    ftraw::Float64
     ob::Float64
     wend::Float64
     wendUsed::Float64
@@ -277,88 +277,157 @@ function distances(instance::TTPInstance, i::Int, j::Int)::Float64
 end
 
 
+# function evaluate(instance::TTPInstance, solution::TTPSolution)
+#     tour = solution.tspTour
+#     z    = solution.packingPlan
+
+#     # 读取背包容量/租用率/速度上下限
+#     weightofKnapsack = instance.capacityOfKnapsack
+#     rentRate         = instance.rentingRatio
+#     vmin             = instance.minSpeed
+#     vmax             = instance.maxSpeed
+
+#     # 初始化结果
+#     solution.ftraw = 0.0
+#     solution.ft    = 0.0
+#     solution.fp    = 0.0
+
+#     # 判断路径首尾是否相同
+#     if tour[1] != tour[end]
+#         @printf("ERROR: The last city must be the same as the first city\n")
+#         # 如果需要可以清空 solution 或做其他操作
+#         return
+#     end
+
+#     # 当前背包重量
+#     wc = 0.0
+
+#     # 假设 itemsPerCity = length(z) ÷ (length(tour) - 2)
+
+#     itemsPerCity = length(z) ÷ (length(tour) - 2)
+
+#     # 遍历路线
+#     for i = 1:(length(tour)-1)
+#         currentCityTEMP = tour[i]        # 0-based
+#         # i=1 的时候是第一座城市(往往是起点)
+
+#         # ========== 拿物品的逻辑 ==========
+#         # 在 Java 代码中：if(i>0) { ... }
+#         # 相当于跳过第一个城市(起点不拿东西)
+#         if i > 1
+#             # cityIndexForItem = currentCityTEMP - 1
+#             cityIndexForItem = currentCityTEMP - 1
+
+#             # 对应 Java 中的 for (int itemNumber=0; itemNumber<itemsPerCity; itemNumber++)
+#             for itemNumber = 1:itemsPerCity
+#                 # indexOfPackingPlan = (i-1)*itemsPerCity+itemNumber
+#                 indexOfPackingPlan = (i-2)*itemsPerCity + itemNumber
+#                 # 注意 Julia 是 1-based，所以要注意加减
+
+#                 # itemIndex = cityIndexForItem + itemNumber*(instance.numberOfNodes-1)
+#                 itemIndex = cityIndexForItem + (itemNumber-1)*(instance.numberOfNodes-1)
+
+#                 # 如果 z[indexOfPackingPlan] == 1，说明要拿这个物品
+#                 # 注意 Julia 下标
+#                 if z[indexOfPackingPlan] == 1
+#                     currentWC  = instance.items[itemIndex, 2]  # weight
+#                     currentFP  = instance.items[itemIndex, 1]  # profit
+#                     wc        += currentWC
+#                     solution.fp += currentFP
+#                     println(indexOfPackingPlan, " ", currentWC, " ", wc, " ")
+#                     # println(instance.items[itemIndex, :])
+#                 end
+#             end
+#         end
+
+#         # ========== 计算距离 + 时间 ==========
+#         # 下一个城市的下标 h
+#         h = (i+1)
+#         # 计算距离
+#         d = distances(instance, tour[i], tour[h])
+#         solution.ftraw += d
+
+#         # 速度衰减模型
+#         # ( distance / (vmax - wc * (vmax - vmin)/weightofKnapsack) )
+#         solution.ft += d / (vmax - wc * (vmax - vmin)/weightofKnapsack)
+
+#     end
+
+#     # 记录最终的背包使用情况
+#     solution.wendUsed = wc
+#     solution.wend     = weightofKnapsack - wc
+
+#     # 目标函数
+#     solution.ob = solution.fp - solution.ft * rentRate
+
+#     return
+# end
+
 function evaluate(instance::TTPInstance, solution::TTPSolution)
-    tour = solution.tspTour
-    z    = solution.packingPlan
+    tour = solution.tspTour        # 例如 [1, 5, 10, ..., 1] (1-based)
+    z    = solution.packingPlan    # 长度 = instance.numberOfItems
 
-    # 读取背包容量/租用率/速度上下限
-    weightofKnapsack = instance.capacityOfKnapsack
-    rentRate         = instance.rentingRatio
-    vmin             = instance.minSpeed
-    vmax             = instance.maxSpeed
+    # 1) 先把选中的物品按city分组: city -> (list of items)
+    #    (city 是 1-based；itemsMatrix[i, 3] 也是 1-based)
+    #    item i: itemsMatrix[i, :] = [profit, weight, city]
+    chosen_items_by_city = Dict{Int, Vector{Int}}()
 
-    # 初始化结果
+    for i in 1:instance.numberOfItems
+        if z[i] == 1
+            city = instance.items[i, 3]  # (1-based)
+            if !haskey(chosen_items_by_city, city)
+                chosen_items_by_city[city] = Int[]
+            end
+            push!(chosen_items_by_city[city], i)  # item index
+        end
+    end
+
+    # 2) 遍历路线计算: 路线距离 & 取物品(累加背包重量和利润) & 受重量影响的时间
     solution.ftraw = 0.0
     solution.ft    = 0.0
     solution.fp    = 0.0
+    wc = 0.0  # 当前背包重量
 
-    # 判断路径首尾是否相同
-    if tour[1] != tour[end]
-        @printf("ERROR: The last city must be the same as the first city\n")
-        # 如果需要可以清空 solution 或做其他操作
-        return
-    end
+    rentRate = instance.rentingRatio
+    vmin     = instance.minSpeed
+    vmax     = instance.maxSpeed
+    W        = instance.capacityOfKnapsack
 
-    # 当前背包重量
-    wc = 0.0
+    for i in 1:(length(tour)-1)
+        currentCity = tour[i]      # 1-based
+        nextCity    = tour[i+1]    # 1-based
 
-    # 假设 itemsPerCity = length(z) ÷ (length(tour) - 2)
-
-    itemsPerCity = length(z) ÷ (length(tour) - 2)
-
-    # 遍历路线
-    for i = 1:(length(tour)-1)
-        currentCityTEMP = tour[i]        # 0-based
-        # i=1 的时候是第一座城市(往往是起点)
-
-        # ========== 拿物品的逻辑 ==========
-        # 在 Java 代码中：if(i>0) { ... }
-        # 相当于跳过第一个城市(起点不拿东西)
-        if i > 1
-            # cityIndexForItem = currentCityTEMP - 1
-            cityIndexForItem = currentCityTEMP - 1
-
-            # 对应 Java 中的 for (int itemNumber=0; itemNumber<itemsPerCity; itemNumber++)
-            for itemNumber = 1:itemsPerCity
-                # indexOfPackingPlan = (i-1)*itemsPerCity+itemNumber
-                indexOfPackingPlan = (i-2)*itemsPerCity + itemNumber
-                # 注意 Julia 是 1-based，所以要注意加减
-
-                # itemIndex = cityIndexForItem + itemNumber*(instance.numberOfNodes-1)
-                itemIndex = cityIndexForItem + (itemNumber-1)*(instance.numberOfNodes-1)
-
-                # 如果 z[indexOfPackingPlan] == 1，说明要拿这个物品
-                # 注意 Julia 下标
-                if z[indexOfPackingPlan] == 1
-                    currentWC  = instance.items[itemIndex, 2]  # weight
-                    currentFP  = instance.items[itemIndex, 1]  # profit
-                    wc        += currentWC
-                    solution.fp += currentFP
+        # == 拿物品 ==
+        # 若这不是起点(或你自己定义不拿物品的城市),且 chosen_items_by_city 有该 city
+        if i > 1  # 跳过第一个城市(假设不拿物品)
+            if haskey(chosen_items_by_city, currentCity)
+                # 这个城市被选的物品
+                for itemIdx in chosen_items_by_city[currentCity]
+                    w_item = instance.items[itemIdx, 2]
+                    p_item = instance.items[itemIdx, 1]
+                    wc += w_item
+                    solution.fp += p_item
                 end
             end
         end
 
-        # ========== 计算距离 + 时间 ==========
-        # 下一个城市的下标 h
-        h = (i+1)
-        # 计算距离
-        d = distances(instance, tour[i], tour[h])
+        # == 计算距离 & 时间 ==
+        d = distances(instance, currentCity, nextCity)
         solution.ftraw += d
-
-        # 速度衰减模型
-        # ( distance / (vmax - wc * (vmax - vmin)/weightofKnapsack) )
-        solution.ft += d / (vmax - wc * (vmax - vmin)/weightofKnapsack)
+        # 速度衰减公式: time = d / [vmax - (wc/W)*(vmax - vmin)]
+        solution.ft += d / (vmax - wc*(vmax - vmin)/W)
     end
 
-    # 记录最终的背包使用情况
+    # 3) 背包剩余容量
     solution.wendUsed = wc
-    solution.wend     = weightofKnapsack - wc
+    solution.wend     = W - wc
 
-    # 目标函数
-    solution.ob = solution.fp - solution.ft * rentRate
+    # 4) 目标函数
+    solution.ob = solution.fp - rentRate * solution.ft
 
     return
 end
+
 
 function printInstance(instance::TTPInstance; shortSummary::Bool=true)
     if shortSummary
