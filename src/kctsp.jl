@@ -1,97 +1,149 @@
-using JuMP, Gurobi
+using JuMP
+using Distances
+import Plots
+import Gurobi
 
-# 问题参数
-function solve_kctsp(n, m, d, w, p, W, K)
-    # 创建模型
+include("TTP.jl")
+using .TTP
+
+function build_kctsp_model(instance::TTP.TTPInstance)
+    n = instance.numberOfNodes
+    m = instance.numberOfItems
+
+    itemsPerCity = m ÷ (n - 1)
+
+    # matrix(X,Y)
+    nodes = instance.nodes
+
+    # matrix(profit,weight,city)
+    items = instance.items
+
+    # w is the 2nd col of items matrix
+    w = [items[i, 2] for i = 1:m]
+    p = [items[i, 1] for i = 1:m]
+
+    W = instance.capacityOfKnapsack
+    K = instance.rentingRatio
+
+    d = pairwise(Euclidean(), nodes', dims=2)
+
     model = Model(Gurobi.Optimizer)
-    
-    # 决策变量
-    @variable(model, x[1:n,1:n], Bin)  # 路径选择
-    @variable(model, y[i=1:n,k=1:m[i]], Bin)  # 物品选择
-    @variable(model, W_i[1:n] >= 0)  # 离开每个城市时的重量
-    @variable(model, 1 <= u[1:n] <= n)  # MTZ子回路消除变量
-    
-    # 目标函数
-    @objective(model, Max, 
-        sum(p[i][k] * y[i,k] for i=1:n for k=1:m[i]) - 
-        K * sum(d[i,j] * W_i[i] * x[i,j] for i=1:n for j=1:n if i!=j)
+
+    @variable(model, x[1:n, 1:n], Bin, Symmetric)
+    @variable(model, y[i=2:n, k=1:itemsPerCity], Bin)
+    @variable(model, W_i[2:n] >= 0) # 离开每个城市时的重量
+
+    @objective(model, Max,
+        sum(p[(i-2)*itemsPerCity+k] * y[i, k] for i = 2:n for k = 1:itemsPerCity) -
+        K * (d[1, n] * W_i[n] + sum(d[i, i+1] * W_i[i] for i = 2:n-1))
     )
-    
-    # 约束条件
-    # 1. TSP约束 - 每个城市访问一次
-    for i=1:n
-        @constraint(model, sum(x[i,j] for j=1:n if j!=i) == 1)  # 出度
-        @constraint(model, sum(x[j,i] for j=1:n if j!=i) == 1)  # 入度
-    end
-    
-    # 2. MTZ子回路消除约束
-    for i=2:n
-        for j=2:n
-            if i != j
-                @constraint(model, u[i] - u[j] + n*x[i,j] <= n-1)
-            end
-        end
-    end
-    @constraint(model, u[1] == 1)
-    
-    # 3. 背包容量约束
-    @constraint(model, 
-        sum(w[i][k] * y[i,k] for i=1:n for k=1:m[i]) <= W
+
+    # TSP constraints
+    @constraint(model, [i in 1:n], sum(x[i, :]) == 2)
+    @constraint(model, [i in 1:n], x[i, i] == 0)
+
+    # 背包容量约束
+    @constraint(model,
+        sum(w[(i-2)*itemsPerCity+k] * y[i, k] for i = 2:n for k = 1:itemsPerCity) <= W
     )
-    
-    # 4. 累计重量计算
-    # 初始城市重量
-    @constraint(model, W_i[1] == sum(w[1][k] * y[1,k] for k=1:m[1]))
-    
-    # 其他城市重量
-    M = sum(maximum(w[i]) for i=1:n) # 足够大的常数
-    for i=2:n
-        for j=1:n
-            if i != j
-                @constraint(model, 
-                    W_i[i] >= W_i[j] + sum(w[i][k] * y[i,k] for k=1:m[i]) - 
-                    M * (1 - x[j,i])
-                )
-            end
-        end
-    end
-    
-    # 求解
-    optimize!(model)
-    
-    return objective_value(model), 
-           value.(x), 
-           value.(y), 
-           value.(W_i)
+
+    # 累计重量 W_i == sum_k=1:i sum_j = 1:m_i w_kj * y_kj
+    @constraint(
+        model, [i in 2:n], W_i[i] == sum(w[(j-2)*itemsPerCity+k] * y[i, k] for j = 2:i for k = 1:itemsPerCity)
+    )
+
+
+    return model
 end
 
-# 使用示例
-function example()
-    n = 3  # 城市数
-    m = [2, 2, 2]  # 每个城市的物品数
-    d = [
-        0 10 20;
-        10 0 30;
-        20 30 0
-    ]  # 距离矩阵
-    w = [
-        [2, 3],  # 城市1的物品重量
-        [4, 1],  # 城市2的物品重量
-        [3, 2]   # 城市3的物品重量
-    ]
-    p = [
-        [10, 15],  # 城市1的物品价值
-        [20, 5],   # 城市2的物品价值
-        [12, 8]    # 城市3的物品价值
-    ]
-    W = 10  # 背包容量
-    K = 0.1  # 每公里每公斤的运输成本
-    
-    obj, x, y, W_i = solve_kctsp(n, m, d, w, p, W, K)
-    println("最优目标值: ", obj)
-    println("路径选择: ", x)
-    println("物品选择: ", y)
-    println("各城市离开时重量: ", W_i)
+
+function subtour(edges::Vector{Tuple{Int,Int}}, n)
+    shortest_subtour, unvisited = collect(1:n), Set(collect(1:n))
+    while !isempty(unvisited)
+        this_cycle, neighbors = Int[], unvisited
+        while !isempty(neighbors)
+            current = pop!(neighbors)
+            push!(this_cycle, current)
+            if length(this_cycle) > 1
+                pop!(unvisited, current)
+            end
+            neighbors =
+                [j for (i, j) in edges if i == current && j in unvisited]
+        end
+        if length(this_cycle) < length(shortest_subtour)
+            shortest_subtour = this_cycle
+        end
+    end
+    return shortest_subtour
 end
 
-example()
+subtour(x::Matrix{Float64}) = subtour(selected_edges(x, size(x, 1)), size(x, 1))
+subtour(x::AbstractMatrix{VariableRef}) = subtour(value.(x))
+
+function selected_edges(x::Matrix{Float64}, n)
+    return Tuple{Int,Int}[(i, j) for i in 1:n, j in 1:n if x[i, j] > 0.5]
+end
+
+
+
+function subtour_elimination_callback(cb_data)
+    status = callback_node_status(cb_data, lazy_model)
+    if status != MOI.CALLBACK_NODE_STATUS_INTEGER
+        return  # Only run at integer solutions
+    end
+    cycle = subtour(callback_value.(cb_data, lazy_model[:x]))
+    if !(1 < length(cycle) < n)
+        return  # Only add a constraint if there is a cycle
+    end
+    S = [(i, j) for (i, j) in Iterators.product(cycle, cycle) if i < j]
+    con = @build_constraint(
+        sum(lazy_model[:x][i, j] for (i, j) in S) <= length(cycle) - 1,
+    )
+    MOI.submit(lazy_model, MOI.LazyConstraint(cb_data), con)
+    return
+end
+
+
+
+filename = "data/a280_n279_bounded-strongly-corr_01.ttp.txt"
+instance = TTPInstance(filename)
+n = instance.numberOfNodes
+lazy_model = build_kctsp_model(instance)
+set_attribute(
+    lazy_model,
+    MOI.LazyConstraintCallback(),
+    subtour_elimination_callback,
+)
+optimize!(lazy_model)
+
+
+obj = objective_value(lazy_model)
+println("Objective value: $obj")
+time_lazy = solve_time(lazy_model)
+println("Time to solve: $time_lazy")
+
+
+function final_tsp_tour(x::Matrix{Float64})
+    n = size(x, 1)
+    edges = selected_edges(x, n)
+    path = [1]
+    current = 1
+    unvisited = Set(collect(2:n))
+    neighbors = [j for (i, j) in edges if i == current && j in unvisited]
+    while !isempty(neighbors)
+        current = pop!(neighbors)
+        push!(path, current)
+
+        pop!(unvisited, current)
+
+        neighbors =
+            [j for (i, j) in edges if i == current && j in unvisited]
+    end
+
+    push!(path, 1)
+    return path
+end
+
+tspTour = final_tsp_tour(value.(lazy_model[:x]))
+println("Tour: $tspTour")
+
