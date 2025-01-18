@@ -31,34 +31,50 @@ function build_kctsp_model(instance::TTP.TTPInstance)
 
     model = Model(Gurobi.Optimizer)
 
+    # Decision variables:
+    # x[i,j] = 1 if the path goes directly from city i to j
     @variable(model, x[1:n, 1:n], Bin)
+    # y[i,k] = 1 if item k in city i is taken
     @variable(model, y[i=2:n, k=1:itemsPerCity], Bin)
-    @variable(model, W_i[1:n] >= 0) # 离开每个城市时的重量
+    # W_i = current knapsack weight upon *departing* city i
+    @variable(model, W_i[1:n] >= 0)
 
+    # Objective: maximize total profit minus transport cost
+    # cost = K * Σ_{(i->j)} d[i,j]*W_i * x[i,j]
+    # profit = Σ p_{i,k} * y[i,k]
     @objective(model, Max,
         sum(p[i, k] * y[i, k] for i = 2:n for k = 1:itemsPerCity)
         -
         K * sum(d[i, j] * W_i[i] * x[i, j] for i in 1:n, j in 1:n if i != j))
 
-    # 容量约束
+    # Knapsack capacity
     @constraint(model,
         sum(w[i, k] * y[i, k] for i = 2:n for k = 1:itemsPerCity) <= W
     )
 
-    # TSP constraints
+    # Basic TSP constraints: each city has in-degree 1 and out-degree 1
     @constraint(model, [i in 1:n], sum(x[i, :]) == 1)
     @constraint(model, [j in 1:n], sum(x[:, j]) == 1)
     @constraint(model, [i in 1:n], x[i, i] == 0)
 
-    # 累计重量 W_i 
-    M = 1000000
+    # Weight propagation (the "two-sided" big-M trick):
+    # If x[i,j]==1, then W_j must be exactly W_i + sum-of-items-chosen-in-j.
+    # Using M = W (the max capacity) as big-M.
     @constraint(model, [i in 1:n, j in 2:n; i != j],
         W_i[j] >= W_i[i] + sum(w[j, k] * y[j, k] for k = 1:itemsPerCity)
                   -
-                  M * (1 - x[i, j])
+                  W * (1 - x[i, j])
     )
-    @constraint(model, W_i[1] == 0.0)
+    @constraint(model, [i in 1:n, j in 2:n; i != j],
+        W_i[j] <= W_i[i] + sum(w[j, k] * y[j, k] for k = 1:itemsPerCity)
+                  +
+                  W * (1 - x[i, j])
+    )
+
+    # W_i cannot exceed capacity
     @constraint(model, [i in 1:n], W_i[i] <= W)
+
+
     return model
 end
 
