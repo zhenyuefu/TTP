@@ -1,34 +1,7 @@
-using LKH
-
-
-
 include("TTP.jl")
 using .TTP
-
-function lkh(instance::TTPInstance)::Vector{Int}
-    """
-    使用 LKH 算法求解 TTP 问题d的 TSP 部分。
-    参数:
-        instance: TTPInstance, 包含城市坐标、物品信息、背包容量、速度上下限等
-    返回:
-        一个城市序列，其中 route[1] == route[end]
-    """
-
-    nodes = instance.nodes
-
-    x = nodes[:, 1]
-    y = nodes[:, 2]
-
-    # 调用 LKH 求解 TSP
-
-    opt_tour, opt_len = solve_tsp(x, y; dist="EUC_2D")
-
-    # 第一个城市添加到最后，形成闭环
-    push!(opt_tour, opt_tour[1])
-
-    return opt_tour
-
-end
+include("utils.jl")
+using .Utils
 
 function simpleHeuristic(instance::TTPInstance, route::Vector{Int})::TTPSolution
     """
@@ -160,6 +133,10 @@ end
 
 filename = "data/a280_n279_bounded-strongly-corr_01.ttp.txt"
 instance = TTPInstance(filename)
+start_time = Utils.start_timing()
 route = lkh(instance)
 sol = simpleHeuristic(instance, route)
+elapsed = Utils.stop_timing(start_time)
+sol.computationTime = elapsed
+
 printFullSolution(sol)

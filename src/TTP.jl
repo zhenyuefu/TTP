@@ -1,6 +1,7 @@
 module TTP
-export TTPSolution, TTPInstance, distances, evaluate, printInstance
+export TTPSolution, TTPInstance, distances, evaluate, printInstance, printFullSolution, lkh
 using Printf
+using LKH
 
 mutable struct TTPSolution
     tspTour::Vector{Int}
@@ -16,13 +17,13 @@ mutable struct TTPSolution
     function TTPSolution(
         tspTour::Vector{Int},
         packingPlan::Vector{Int};
-        fp::Float64 = -Inf,
-        ft::Float64 = Inf,
-        ftraw::Int = typemax(Int),
-        ob::Float64 = -Inf,
-        wend::Float64 = Inf,
-        wendUsed::Float64 = Inf,
-        computationTime::Int = typemax(Int)
+        fp::Float64=-Inf,
+        ft::Float64=Inf,
+        ftraw::Int=typemax(Int),
+        ob::Float64=-Inf,
+        wend::Float64=Inf,
+        wendUsed::Float64=Inf,
+        computationTime::Int=typemax(Int)
     )
         new(
             tspTour,
@@ -33,24 +34,18 @@ mutable struct TTPSolution
 end
 
 function reset!(sol::TTPSolution)
-    sol.fp   = -Inf
-    sol.ft   = Inf
+    sol.fp = -Inf
+    sol.ft = Inf
     sol.ftraw = typemax(Int)
-    sol.ob   = -Inf
+    sol.ob = -Inf
     sol.wend = Inf
     sol.wendUsed = Inf
     sol.computationTime = typemax(Int)
 end
 
 function printSolution(sol::TTPSolution)
-    @printf("%.2f %.2f %.2f %d %.2f %.2f %d",
-        sol.wend,
-        sol.wendUsed,
-        sol.fp,
-        sol.ftraw,
-        sol.ft,
-        sol.ob,
-        sol.computationTime
+    @printf("TTPSolution: ob=%.3f, fp=%.3f, ft=%.3f, ftraw=%.3f, wend=%.3f, wendUsed=%.3f, computationTime=%d ms\n",
+        sol.ob, sol.fp, sol.ft, sol.ftraw, sol.wend, sol.wendUsed, sol.computationTime
     )
 end
 
@@ -72,7 +67,7 @@ end
 function answer(sol::TTPSolution)::String
     tourLength = length(sol.tspTour)
     tourOut = Vector{Int}(undef, tourLength - 1)
-    for i in 1:(tourLength - 1)
+    for i in 1:(tourLength-1)
         # tspTour[i] 0-based -> +1
         tourOut[i] = sol.tspTour[i] + 1
     end
@@ -80,11 +75,11 @@ function answer(sol::TTPSolution)::String
     itemsPerCity = div(length(sol.packingPlan), (tourLength - 2))
     packingPlanList = Int[]
     packingPlanIndex = 1
-    for i in 2:(tourLength - 1)
+    for i in 2:(tourLength-1)
         city = sol.tspTour[i]
         for j in 1:itemsPerCity
             if sol.packingPlan[packingPlanIndex] == 1
-                itemIndex = (j-1)*(tourLength - 2) + (city - 1)
+                itemIndex = (j - 1) * (tourLength - 2) + (city - 1)
                 push!(packingPlanList, itemIndex + 1)
             end
             packingPlanIndex += 1
@@ -120,15 +115,15 @@ struct TTPInstance
     # 构造函数
     function TTPInstance(filename::String)
         # 先定义一些默认值
-        problemName       = ""
-        knapsackDataType  = ""
-        numberOfNodes     = 0
-        numberOfItems     = 0
-        capacityOfKnapsack= 0
-        minSpeed          = 0.0
-        maxSpeed          = 0.0
-        rentingRatio      = 0.0
-        edgeWeightType    = ""
+        problemName = ""
+        knapsackDataType = ""
+        numberOfNodes = 0
+        numberOfItems = 0
+        capacityOfKnapsack = 0
+        minSpeed = 0.0
+        maxSpeed = 0.0
+        rentingRatio = 0.0
+        edgeWeightType = ""
 
         # 为了能在定义时先声明，再在读到具体值后再赋值，这里先构造一个空数组
         # 后续遇到 NODE_COORD_SECTION 或 ITEMS SECTION 时再进行实际初始化
@@ -141,9 +136,9 @@ struct TTPInstance
         # 用一个临时变量，用于控制当读到 NODE_COORD_SECTION 或 ITEMS SECTION 后
         # 后续行应该如何读取
         readingNodeCoords = false
-        readingItems      = false
-        nodeCount         = 0  # 用于计数已经读取了多少行 node
-        itemCount         = 0  # 用于计数已经读取了多少行 item
+        readingItems = false
+        nodeCount = 0  # 用于计数已经读取了多少行 node
+        itemCount = 0  # 用于计数已经读取了多少行 item
 
         while !eof(file)
             line = strip(readline(file))
@@ -221,23 +216,23 @@ struct TTPInstance
                 # splittedLine 理论上长度为 3，分别是: index, x, y
                 # TTP 文件中城市索引从 1 开始，
                 cityIndex = parse(Int, splittedLine[1])
-                xCoord    = parse(Float64, splittedLine[2])
-                yCoord    = parse(Float64, splittedLine[3])
+                xCoord = parse(Float64, splittedLine[2])
+                yCoord = parse(Float64, splittedLine[3])
 
                 nodeCount += 1
-            
+
                 nodes[cityIndex, 1] = xCoord
                 nodes[cityIndex, 2] = yCoord
 
-            # 如果在读 ITEMS SECTION 的行
+                # 如果在读 ITEMS SECTION 的行
             elseif readingItems && itemCount < numberOfItems
                 splittedLine = split(line)
                 # splittedLine 理论上长度为 4，分别是: itemIndex, profit, weight, city
-               
+
                 itemIdx = parse(Int, splittedLine[1])
-                profit  = parse(Int, splittedLine[2])
-                weight  = parse(Int, splittedLine[3])
-                city    = parse(Int, splittedLine[4])
+                profit = parse(Int, splittedLine[2])
+                weight = parse(Int, splittedLine[3])
+                city = parse(Int, splittedLine[4])
 
                 itemCount += 1
                 items[itemIdx, 1] = profit
@@ -365,12 +360,12 @@ end
 
 function evaluate(instance::TTPInstance, solution::TTPSolution)
     tour = solution.tspTour        # 例如 [1, 5, 10, ..., 1] (1-based)
-    z    = solution.packingPlan    # 长度 = instance.numberOfItems
+    z = solution.packingPlan    # 长度 = instance.numberOfItems
 
     # 1) 先把选中的物品按city分组: city -> (list of items)
     #    (city 是 1-based；itemsMatrix[i, 3] 也是 1-based)
     #    item i: itemsMatrix[i, :] = [profit, weight, city]
-    chosen_items_by_city = Dict{Int, Vector{Int}}()
+    chosen_items_by_city = Dict{Int,Vector{Int}}()
 
     for i in 1:instance.numberOfItems
         if z[i] == 1
@@ -384,18 +379,18 @@ function evaluate(instance::TTPInstance, solution::TTPSolution)
 
     # 2) 遍历路线计算: 路线距离 & 取物品(累加背包重量和利润) & 受重量影响的时间
     solution.ftraw = 0.0
-    solution.ft    = 0.0
-    solution.fp    = 0.0
+    solution.ft = 0.0
+    solution.fp = 0.0
     wc = 0.0  # 当前背包重量
 
     rentRate = instance.rentingRatio
-    vmin     = instance.minSpeed
-    vmax     = instance.maxSpeed
-    W        = instance.capacityOfKnapsack
+    vmin = instance.minSpeed
+    vmax = instance.maxSpeed
+    W = instance.capacityOfKnapsack
 
     for i in 1:(length(tour)-1)
         currentCity = tour[i]      # 1-based
-        nextCity    = tour[i+1]    # 1-based
+        nextCity = tour[i+1]    # 1-based
 
         # == 拿物品 ==
         # 若这不是起点(或你自己定义不拿物品的城市),且 chosen_items_by_city 有该 city
@@ -415,12 +410,12 @@ function evaluate(instance::TTPInstance, solution::TTPSolution)
         d = distances(instance, currentCity, nextCity)
         solution.ftraw += d
         # 速度衰减公式: time = d / [vmax - (wc/W)*(vmax - vmin)]
-        solution.ft += d / (vmax - wc*(vmax - vmin)/W)
+        solution.ft += d / (vmax - wc * (vmax - vmin) / W)
     end
 
     # 3) 背包剩余容量
     solution.wendUsed = wc
-    solution.wend     = W - wc
+    solution.wend = W - wc
 
     # 4) 目标函数
     solution.ob = solution.fp - rentRate * solution.ft
@@ -454,7 +449,7 @@ function printInstance(instance::TTPInstance; shortSummary::Bool=true)
 
         println("NODE_COORD_SECTION:")
         for i in 1:instance.numberOfNodes
-            println(instance.nodes[i, :]) 
+            println(instance.nodes[i, :])
         end
 
         println("ITEMS SECTION:")
@@ -464,6 +459,31 @@ function printInstance(instance::TTPInstance; shortSummary::Bool=true)
 
         println("---- TTP Instance END ----")
     end
+end
+
+function lkh(instance::TTPInstance)::Vector{Int}
+    """
+    使用 LKH 算法求解 TTP 问题d的 TSP 部分。
+    参数:
+        instance: TTPInstance, 包含城市坐标、物品信息、背包容量、速度上下限等
+    返回:
+        一个城市序列，其中 route[1] == route[end]
+    """
+
+    nodes = instance.nodes
+
+    x = nodes[:, 1]
+    y = nodes[:, 2]
+
+    # 调用 LKH 求解 TSP
+
+    opt_tour, opt_len = solve_tsp(x, y; dist="EUC_2D")
+
+    # 第一个城市添加到最后，形成闭环
+    push!(opt_tour, opt_tour[1])
+
+    return opt_tour
+
 end
 
 end # module TTP
