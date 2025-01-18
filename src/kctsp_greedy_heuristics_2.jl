@@ -156,6 +156,79 @@ end
 
 
 """
+    iterative_knapsack(instance, route, packingPlan, K; max_iter=100)
+
+在给定固定路线（route）和初始背包选择方案（packingPlan）的基础上，
+使用局部搜索(迭代启发式)对 packingPlan 进行改进。  
+要求满足背包容量约束（即总重量不超过 capacity）。
+返回：改进后的 packingPlan（0/1 向量）。
+"""
+function iterative_knapsack(instance::TTPInstance, route::Vector{Int}, packingPlan::Vector{Int}, K::Float64; max_iter::Int=100)
+    m = instance.numberOfItems
+    capacity = instance.capacityOfKnapsack
+    itemsMatrix = instance.items
+
+    # 计算当前解的目标值和总重量
+    function evaluate_current(pPlan)
+        # 调用 evaluate_kctsp 来计算目标值
+        # 其中 evaluate_kctsp 返回: (objective, rawDistance, totalProfit, totalWeight, transportCost)
+        (obj, _, _, totalWeight, _) = evaluate_kctsp(instance, route, pPlan, K)
+        return (obj, totalWeight)
+    end
+
+    best_plan = copy(packingPlan)
+    best_obj, best_weight = evaluate_current(best_plan)
+    # 如果初始解不满足背包约束（总重量超限），可以先返回贪心解或者处理
+    if best_weight > capacity
+        @warn "Initial knapsack solution violates capacity. Weight = $best_weight, capacity = $capacity"
+        return best_plan
+    end
+
+    iter = 0
+    improved = true
+    while improved && iter < max_iter
+        improved = false
+        iter += 1
+        # 遍历所有物品逐个尝试翻转
+        for i in 1:m
+            # 生成一个候选解: 翻转 i 项
+            candidate = copy(best_plan)
+            candidate[i] = 1 - candidate[i]  # flip: 0->1 or 1->0
+
+            # 计算候选解总重量
+            totalWeight_candidate = 0.0
+            for j in 1:m
+                if candidate[j] == 1
+                    totalWeight_candidate += itemsMatrix[j, 2]
+                end
+            end
+
+            # 若违反背包容量，跳过
+            if totalWeight_candidate > capacity
+                continue
+            end
+
+            # 计算候选解目标值
+            candidate_obj, candidate_weight = evaluate_current(candidate)
+
+            # 若目标函数值提高则接受该候选方案
+            if candidate_obj > best_obj
+                best_obj = candidate_obj
+                best_weight = candidate_weight
+                best_plan = candidate
+                improved = true
+                # 跳出内层循环，重新遍历全部物品
+                break
+            end
+        end
+        @printf("Iter %d: Best Obj = %.2f, TotalWeight = %.2f\n", iter, best_obj, best_weight)
+    end
+
+    return best_plan
+end
+
+
+"""
     evaluate_kctsp(instance::TTPInstance, route, packingPlan, K)
 
 线性目标:
@@ -349,6 +422,7 @@ function solve_kctsp_iterative(instance::TTPInstance, K::Float64, max_iter::Int)
 
     # 3) knapsack
     packingPlan = greedy_kctsp_knapsack(instance, optimized_route, K)
+    packingPlan = iterative_knapsack(instance, optimized_route, packingPlan, K, max_iter=100)
 
     # 4) 计算目标值
     (obj, rawDist, tp, finalWeight, transCost) = evaluate_kctsp(instance, optimized_route, packingPlan, K)
@@ -377,7 +451,8 @@ end
 运行2-opt启发式，并打印解
 """
 function test_kctsp_iterative()
-    filename = "data/a280_n279_bounded-strongly-corr_01.ttp.txt"
+    # filename = "data/a280_n279_bounded-strongly-corr_01.ttp.txt"
+    filename = "data/a280_n1395_uncorr-similar-weights_05.ttp.txt"
     instance = TTPInstance(filename)
     K = 0.001   # 每公里每公斤的运输成本
 

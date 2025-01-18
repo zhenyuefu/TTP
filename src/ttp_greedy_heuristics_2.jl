@@ -289,6 +289,106 @@ end
 #     return plt
 # end
 
+#-----------------------------------------------------
+# 迭代启发式改进背包选择（以固定路线下求解TTP为例）
+#-----------------------------------------------------
+
+"""
+    iterative_knapsack_with_time(instance, route, initial_plan; max_iter=100)
+
+在给定固定路线 route 与初始背包解 initial_plan（0/1 向量）的基础上，
+采用局部搜索对背包部分进行逐个物品“翻转”改进：
+  - 遍历每个物品，尝试将选/不选状态翻转；
+  - 生成候选解后，构造一个临时 TTPSolution，并调用 evaluate(instance, sol)
+    计算目标函数值（目标 = 总物品利润 – 租金×旅行时间）；
+  - 若该候选解满足背包容量约束（即剩余容量 wend ≥ 0），且目标函数提高，则接受此候选解；
+  - 重复迭代直到一整轮没有改进或达到最大迭代次数。
+
+返回：改进后的 packingPlan（0/1 向量）。
+"""
+function iterative_knapsack_with_time(instance::TTPInstance, route::Vector{Int}, initial_plan::Vector{Int}; max_iter::Int=100)
+    m = instance.numberOfItems
+    # 复制一个当前解
+    current_plan = copy(initial_plan)
+    
+    # 构造临时解对象，用于评估。注意这里目标函数用 TTP 模块中 evaluate 进行计算，
+    # 该函数根据路线和 packingPlan 累计各城市取物品后的重量、利润、旅行时间等。
+    function evaluate_plan(plan::Vector{Int})
+        sol_temp = TTPSolution(route, plan;
+                               fp=-Inf, ft=Inf, ftraw=typemax(Int),
+                               ob=-Inf, wend=Inf, wendUsed=Inf,
+                               computationTime=0)
+        evaluate(instance, sol_temp)
+        return sol_temp
+    end
+
+    best_sol = evaluate_plan(current_plan)
+    best_obj = best_sol.ob
+    iter = 0
+    improved = true
+
+    while improved && iter < max_iter
+        improved = false
+        iter += 1
+        for i in 1:m
+            candidate = copy(current_plan)
+            # 翻转第 i 个物品的状态（0->1 或 1->0）
+            candidate[i] = 1 - candidate[i]
+            sol_candidate = evaluate_plan(candidate)
+            # 检查背包容量是否满足（剩余容量应为非负）
+            if sol_candidate.wend < 0
+                continue  # 违反容量约束，不接受
+            end
+            # 若目标函数值提高，则接受候选方案
+            if sol_candidate.ob > best_obj
+                best_obj = sol_candidate.ob
+                best_sol = sol_candidate
+                current_plan = candidate
+                improved = true
+                @printf("Iter %d: Improved objective = %.2f\n", iter, best_obj)
+                # 更新后跳出内部循环，重新扫描所有物品
+                break
+            end
+        end
+    end
+
+    return current_plan
+end
+
+"""
+    solve_ttp_iterative(instance)
+
+综合求解函数：
+1. 用最近邻 + 2-opt 改进获得固定路线；
+2. 用“单位时间收益”贪心得到初始的背包解；
+3. 采用迭代启发式改进背包解；
+4. 构造 TTPSolution 并调用 evaluate 最终评估目标函数值。
+
+返回改进后的 TTPSolution 对象。
+"""
+function solve_ttp_iterative(instance::TTPInstance)
+    # 1) 路线：使用已有的改进 TSP 函数
+    route0 = nearest_neighbor_route(instance)
+    route = two_opt(route0, instance; max_iter=200)
+    
+    # 2) 初始背包解：使用“单位时间收益”贪心法得到初始选取
+    initial_plan = greedy_knapsack_with_time(instance, route)
+    
+    # 3) 迭代改进背包：利用局部搜索逐个翻转物品状态
+    improved_plan = iterative_knapsack_with_time(instance, route, initial_plan; max_iter=100)
+    
+    # 4) 构造最终解并评估
+    sol = TTPSolution(route, improved_plan;
+                      fp=-Inf, ft=Inf, ftraw=typemax(Int),
+                      ob=-Inf, wend=Inf, wendUsed=Inf,
+                      computationTime=0)
+    start_time = time_ns()
+    evaluate(instance, sol)
+    end_time = time_ns()
+    sol.computationTime = (end_time - start_time)
+    return sol
+end
+
 
 function plot_ttp_solution(instance::TTPInstance, sol::TTPSolution)
     # 1) 获取城市坐标
@@ -367,11 +467,12 @@ end
 # -------------------------------
 
 function test_enhanced()
-    filename = "data/a280_n1395_uncorr-similar-weights_05.ttp.txt"
+    filename = "data/a280_n279_bounded-strongly-corr_01.ttp.txt"
     instance = TTPInstance(filename)
     @info "Loaded instance: $(instance.problemName)"
 
-    sol = solve_ttp_enhanced(instance)
+    # sol = solve_ttp_enhanced(instance)
+    sol = solve_ttp_iterative(instance)
     @info "Solution => "
     TTP.printlnSolution(sol)
 
