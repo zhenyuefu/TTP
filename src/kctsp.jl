@@ -7,20 +7,22 @@ include("TTP.jl")
 using .TTP
 
 function build_kctsp_model(instance::TTP.TTPInstance)
-    n = instance.numberOfNodes
-    m = instance.numberOfItems
-
-    itemsPerCity = m ÷ (n - 1)
-
     # matrix(X,Y)
     nodes = instance.nodes
 
     # matrix(profit,weight,city)
     items = instance.items
 
-    # w is the 2nd col of items matrix
-    w = [items[i, 2] for i = 1:m]
-    p = [items[i, 1] for i = 1:m]
+    w = zeros(n, itemsPerCity)
+    p = zeros(n, itemsPerCity)
+    idx = 1
+    for j in 1:itemsPerCity
+        for i in 2:n
+            w[i, j] = items[idx, 2]
+            p[i, j] = items[idx, 1]
+            idx += 1
+        end
+    end
 
     W = instance.capacityOfKnapsack
     K = instance.rentingRatio
@@ -29,30 +31,34 @@ function build_kctsp_model(instance::TTP.TTPInstance)
 
     model = Model(Gurobi.Optimizer)
 
-    @variable(model, x[1:n, 1:n], Bin, Symmetric)
+    @variable(model, x[1:n, 1:n], Bin)
     @variable(model, y[i=2:n, k=1:itemsPerCity], Bin)
-    @variable(model, W_i[2:n] >= 0) # 离开每个城市时的重量
+    @variable(model, W_i[1:n] >= 0) # 离开每个城市时的重量
 
     @objective(model, Max,
-        sum(p[(i-2)*itemsPerCity+k] * y[i, k] for i = 2:n for k = 1:itemsPerCity) -
-        K * (d[1, n] * W_i[n] + sum(d[i, i+1] * W_i[i] for i = 2:n-1))
+        sum(p[i, k] * y[i, k] for i = 2:n for k = 1:itemsPerCity)
+        -
+        K * sum(d[i, j] * W_i[i] * x[i, j] for i in 1:n, j in 1:n if i != j))
+
+    # 容量约束
+    @constraint(model,
+        sum(w[i, k] * y[i, k] for i = 2:n for k = 1:itemsPerCity) <= W
     )
 
     # TSP constraints
-    @constraint(model, [i in 1:n], sum(x[i, :]) == 2)
+    @constraint(model, [i in 1:n], sum(x[i, :]) == 1)
+    @constraint(model, [j in 1:n], sum(x[:, j]) == 1)
     @constraint(model, [i in 1:n], x[i, i] == 0)
 
-    # 背包容量约束
-    @constraint(model,
-        sum(w[(i-2)*itemsPerCity+k] * y[i, k] for i = 2:n for k = 1:itemsPerCity) <= W
+    # 累计重量 W_i 
+    M = 1000000
+    @constraint(model, [i in 1:n, j in 2:n; i != j],
+        W_i[j] >= W_i[i] + sum(w[j, k] * y[j, k] for k = 1:itemsPerCity)
+                  -
+                  M * (1 - x[i, j])
     )
-
-    # 累计重量 W_i == sum_k=1:i sum_j = 1:m_i w_kj * y_kj
-    @constraint(
-        model, [i in 2:n], W_i[i] == sum(w[(j-2)*itemsPerCity+k] * y[i, k] for j = 2:i for k = 1:itemsPerCity)
-    )
-
-
+    @constraint(model, W_i[1] == 0.0)
+    @constraint(model, [i in 1:n], W_i[i] <= W)
     return model
 end
 
@@ -108,7 +114,11 @@ end
 filename = "data/a280_n279_bounded-strongly-corr_01.ttp.txt"
 instance = TTPInstance(filename)
 n = instance.numberOfNodes
+m = instance.numberOfItems
+
+itemsPerCity = m ÷ (n - 1)
 lazy_model = build_kctsp_model(instance)
+
 set_attribute(
     lazy_model,
     MOI.LazyConstraintCallback(),
@@ -120,8 +130,6 @@ optimize!(lazy_model)
 obj = objective_value(lazy_model)
 println("Objective value: $obj")
 time_lazy = solve_time(lazy_model)
-println("Time to solve: $time_lazy")
-
 
 function final_tsp_tour(x::Matrix{Float64})
     n = size(x, 1)
@@ -145,5 +153,15 @@ function final_tsp_tour(x::Matrix{Float64})
 end
 
 tspTour = final_tsp_tour(value.(lazy_model[:x]))
-println("Tour: $tspTour")
 
+packingPlan = value.(lazy_model[:y])
+
+# packingPlan[i, k] 表示第 i 个城市的第 k 个物品是否被拾取
+# 转换为一个一维数组，packingPlan[i] 表示第 i 个物品是否被拾取
+newpackingPlan = [round(Int, packingPlan[i, k]) for k = 1:itemsPerCity for i = 2:n]
+
+sol = TTPSolution(tspTour, newpackingPlan)
+# convert time to ms
+sol.computationTime = round(Int, time_lazy * 1000)
+TTP.evaluate(instance, sol)
+TTP.printFullSolution(sol)
