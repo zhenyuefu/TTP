@@ -419,7 +419,7 @@ function plot_ttp_solution(instance::TTPInstance, sol::TTPSolution)
           lw=2,
           linecolor=:skyblue,
           label="Route")
-    savefig(plt, "results/TTP_$title_str.png")
+    savefig(plt, "results/iterative/TTP_$title_str.png")
     return plt
 end
 
