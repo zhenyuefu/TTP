@@ -32,6 +32,7 @@ function build_kctsp_model(instance::TTP.TTPInstance)
     d = pairwise(Euclidean(), nodes', dims=2)
 
     model = Model(Gurobi.Optimizer)
+    set_silent(model)
     # Decision variables:
     # x[i,j] = 1 if the path goes directly from city i to j
     @variable(model, x[1:n, 1:n], Bin)
@@ -128,7 +129,15 @@ end
 
 
 
-filename = "data/a280_n1395_uncorr-similar-weights_05.ttp.txt"
+# filename = "data/a280_n279_bounded-strongly-corr_01.ttp.txt"
+# filename = "data/a280_n1395_uncorr-similar-weights_05.ttp.txt"
+filename = "data/a280_n2790_uncorr_10.ttp.txt"
+# filename = "data/fnl4461_n4460_bounded-strongly-corr_01.ttp.txt"
+# filename = "data/fnl4461_n22300_uncorr-similar-weights_05.ttp.txt"
+# filename = "data/fnl4461_n44600_uncorr_10.ttp.txt"
+# filename = "data/pla33810_n33809_bounded-strongly-corr_01.ttp.txt"
+# filename = "data/pla33810_n169045_uncorr-similar-weights_05.ttp.txt"
+# filename = "data/pla33810_n338090_uncorr_10.ttp.txt"
 instance = TTPInstance(filename)
 n = instance.numberOfNodes
 m = instance.numberOfItems
