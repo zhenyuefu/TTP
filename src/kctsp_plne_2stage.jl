@@ -1,6 +1,6 @@
 using JuMP
 using Distances
-import Plots
+using Plots
 import Gurobi
 
 include("TTP.jl")
@@ -67,8 +67,15 @@ function subtour_elimination_callback(cb_data)
 end
 
 
-
-filename = "data/a280_n1395_uncorr-similar-weights_05.ttp.txt"
+# filename = "data/a280_n279_bounded-strongly-corr_01.ttp.txt"
+# filename = "data/a280_n1395_uncorr-similar-weights_05.ttp.txt"
+# filename = "data/a280_n2790_uncorr_10.ttp.txt"
+filename = "data/fnl4461_n4460_bounded-strongly-corr_01.ttp.txt"
+# filename = "data/fnl4461_n22300_uncorr-similar-weights_05.ttp.txt"
+# filename = "data/fnl4461_n44600_uncorr_10.ttp.txt"
+# filename = "data/pla33810_n33809_bounded-strongly-corr_01.ttp.txt"
+# filename = "data/pla33810_n169045_uncorr-similar-weights_05.ttp.txt"
+# filename = "data/pla33810_n338090_uncorr_10.ttp.txt"
 instance = TTPInstance(filename)
 n = instance.numberOfNodes
 m = instance.numberOfItems
@@ -82,8 +89,11 @@ set_attribute(
     MOI.LazyConstraintCallback(),
     subtour_elimination_callback,
 )
+set_time_limit_sec(tsp_model, 120.0)
 optimize!(tsp_model)
 
+gap = relative_gap(tsp_model)
+println("TSP gap: ", gap)
 
 time_tsp = solve_time(tsp_model)
 
@@ -162,6 +172,7 @@ end
 
 
 kp_model = build_kp_model(instance, tspTour)
+et_time_limit_sec(kp_model, 120.0)
 optimize!(kp_model)
 
 time_kp = solve_time(kp_model)
@@ -175,3 +186,44 @@ TTP.evaluate(instance, sol)
 obj = objective_value(kp_model)
 sol.ob = obj
 TTP.printFullSolution(sol)
+
+
+function plot_kctsp_solution(instance::TTPInstance, sol::TTPSolution)
+    cities = instance.nodes
+    route = sol.tspTour
+
+    xs = [cities[route[i], 1] for i in 1:length(route)]
+    ys = [cities[route[i], 2] for i in 1:length(route)]
+
+    items = instance.items
+    packing = sol.packingPlan
+    city_item_count = zeros(Int, instance.numberOfNodes)
+    for i in 1:length(packing)
+        if packing[i] == 1
+            c = items[i, 3]
+            city_item_count[c] += 1
+        end
+    end
+
+    colors = Vector{RGB}(undef, instance.numberOfNodes)
+    max_items = 10
+    for c in 1:instance.numberOfNodes
+        k = min(city_item_count[c], max_items)
+        g = 1.0 - (k / max_items)
+        colors[c] = RGB(g, g, g)
+    end
+
+    title_str = string(instance.problemName, "_items=", instance.numberOfItems,
+        "_obj=", Int64(round(sol.ob)), "_time=",
+        sol.computationTime, "ms")
+    cityX = [cities[i, 1] for i in 1:instance.numberOfNodes]
+    cityY = [cities[i, 2] for i in 1:instance.numberOfNodes]
+
+    plt = scatter(cityX, cityY, marker=:circle, color=colors, ms=5,
+        title=title_str, label="Cities")
+    plot!(plt, xs, ys, seriestype=:path, linecolor=:blue, label="Route")
+    savefig(plt, "results/plne/KCTSP_$title_str.png")
+    return plt
+end
+
+plot_kctsp_solution(instance, sol)

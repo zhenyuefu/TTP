@@ -141,11 +141,12 @@ set_attribute(
     MOI.LazyConstraintCallback(),
     subtour_elimination_callback,
 )
-# set time limit to 2 minutes
-set_time_limit_sec(lazy_model, 120.0)
+
+set_time_limit_sec(lazy_model, 300.0)
 optimize!(lazy_model)
 
-
+gap = relative_gap(lazy_model)
+println("Optimization gap: $gap")
 obj = objective_value(lazy_model)
 println("Objective value: $obj")
 time_lazy = solve_time(lazy_model)
