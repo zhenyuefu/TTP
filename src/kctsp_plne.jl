@@ -25,12 +25,13 @@ function build_kctsp_model(instance::TTP.TTPInstance)
     end
 
     W = instance.capacityOfKnapsack
-    K = instance.rentingRatio
+    R = instance.rentingRatio
+    vmax = instance.maxSpeed
+    K = R / vmax / W
 
     d = pairwise(Euclidean(), nodes', dims=2)
 
     model = Model(Gurobi.Optimizer)
-
     # Decision variables:
     # x[i,j] = 1 if the path goes directly from city i to j
     @variable(model, x[1:n, 1:n], Bin)
@@ -127,7 +128,7 @@ end
 
 
 
-filename = "data/a280_n279_bounded-strongly-corr_01.ttp.txt"
+filename = "data/a280_n1395_uncorr-similar-weights_05.ttp.txt"
 instance = TTPInstance(filename)
 n = instance.numberOfNodes
 m = instance.numberOfItems
@@ -140,6 +141,8 @@ set_attribute(
     MOI.LazyConstraintCallback(),
     subtour_elimination_callback,
 )
+# set time limit to 2 minutes
+set_time_limit_sec(lazy_model, 120.0)
 optimize!(lazy_model)
 
 
