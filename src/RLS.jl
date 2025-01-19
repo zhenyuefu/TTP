@@ -2,7 +2,7 @@ include("TTP.jl")
 using .TTP
 include("utils.jl")
 using .Utils
-
+using Plots
 function randomLocalSearch(instance::TTPInstance, route::Vector{Int}; maxNoImprovement::Int=50)::TTPSolution
     """
     在给定 TSP 路线 route 的前提下，执行随机局部搜索(RLS) 来寻找背包的最优选择方案。
@@ -121,7 +121,7 @@ function plot_ttp_solution(instance::TTPInstance, sol::TTPSolution)
         lw=2,
         linecolor=:skyblue,
         label="Route")
-    savefig(plt, "results/sh/TTP_$title_str.png")
+    savefig(plt, "results/rls/TTP_$title_str.png")
     return plt
 end
 
